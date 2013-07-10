@@ -96,20 +96,18 @@ class TestField(unittest.TestCase):
         )
 
         # Out of range
-        with self.assertRaises(ValueError):
-            field(0xffffffffffffffff+1)
-            field(-1)
+        self.assertRaises(ValueError, field, 0xffffffffffffffff + 1)
+        self.assertRaises(ValueError, field, -1)
 
         # Unsupported argument type
-        with self.assertRaises(TypeError):
-                field(None)
-                field([1,2,3])
+        self.assertRaises(TypeError, field, None)
+        self.assertRaises(TypeError, field, [1, 2, 3])
 
     def test__cast_to_int(self):
         """
         Test type casting from field to int
         """
-        for i in (0, 0x11, 0x1122, 0x112233, 0xffffffff, 0xffffffffffffffff):
+        for i in (0, 0x11, 0x1122, 0x112233, 0xffffffff):
             f = field(i)
             self.assertEqual(
                 int(f),
@@ -119,8 +117,19 @@ class TestField(unittest.TestCase):
 
         # Can't cast string value to int
         f = field(b"not an int value")
-        with self.assertRaises(ValueError):
-            int(f)
+        self.assertRaises(ValueError, int, f)
+
+    def test__cast_to_int(self):
+        """
+        Test type casting from field to long
+        """
+        for i in (0x100000000, 0x100000001, 0x100001122, 0x100112233, 0xffffffffffffffff):
+            f = field(i)
+            self.assertEqual(long(f), i, "Cast field instance to long, value = %d" % i)
+
+        # Can't cast string value to int
+        f = field(b"not a long value")
+        self.assertRaises(ValueError, long, f)
 
 
 class TestResponse(unittest.TestCase):
@@ -195,7 +204,7 @@ class TestResponse(unittest.TestCase):
         r = Response(header, body)
 
         self.assertEqual(r.return_code, 0, "Check return_code property")
-        self.assertIsNone(r.return_message, "Check return_message property")
+        self.assertEqual(r.return_message, None, "Check return_message property")
         self.assertEqual(r.return_code, 0, "Check completion_status property")
         self.assertEqual(r.rowcount, 1, "Check rowcount property")
         self.assertEqual(r._body_length, 20, "Check _body_length attribute")

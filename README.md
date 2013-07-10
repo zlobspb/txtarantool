@@ -8,7 +8,7 @@ non-blocking [tarantool](https://github.com/mailru/tarantool) client for python 
 ### Version 0.1 ###
 Version 0.1 supports all of tarantool commands but it's work in progress...
 You are more than welcome to join me.
-Currently only insert, insert_ret, select and calls are covered with tests.
+Currently only insert, insert_ret, select and call are covered with tests.
 
 ### Features ###
 

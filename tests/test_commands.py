@@ -26,8 +26,9 @@ class TestInsert(unittest.TestCase):
     @defer.inlineCallbacks
     def tearDown(self):
         db = yield tnt.Connection(tnt_host, tnt_port, reconnect=False)
-        yield db.call(space_no0, "tear_down_space", None, space_no0)
-        yield db.call(space_no0, "tear_down_space", None, space_no1)
+        d1 = db.call(space_no0, "tear_down_space", None, space_no0)
+        d2 = db.call(space_no0, "tear_down_space", None, space_no1)
+        yield defer.DeferredList([d1, d2])
         yield db.disconnect()
 
     @defer.inlineCallbacks
@@ -160,6 +161,14 @@ class TestInsert(unittest.TestCase):
 class TestSelect(unittest.TestCase):
 
     @defer.inlineCallbacks
+    def tearDown(self):
+        db = yield tnt.Connection(tnt_host, tnt_port, reconnect=False)
+        d1 = db.call(space_no0, "tear_down_space", None, space_no0)
+        d2 = db.call(space_no0, "tear_down_space", None, space_no1)
+        yield defer.DeferredList([d1, d2])
+        yield db.disconnect()
+
+    @defer.inlineCallbacks
     def test_select(self):
         db = yield tnt.Connection(tnt_host, tnt_port, reconnect=False)
         data = (
@@ -237,11 +246,11 @@ class TestSelect(unittest.TestCase):
     @defer.inlineCallbacks
     def test_select_multi_field_index(self):
         db = yield tnt.Connection(tnt_host, tnt_port, reconnect=False)
-        same_field = 3
+        identical_field = 3
         data = [
-            (randint(0, 2 ** 32 - 1), same_field, 5),
-            (randint(0, 2 ** 32 - 1), same_field, 7),
-            (randint(0, 2 ** 32 - 1), same_field, 11),
+            (randint(0, 2 ** 32 - 1), identical_field, 5),
+            (randint(0, 2 ** 32 - 1), identical_field, 7),
+            (randint(0, 2 ** 32 - 1), identical_field, 11),
         ]
 
         for t in data:
@@ -250,7 +259,7 @@ class TestSelect(unittest.TestCase):
             self.assertIn(" inserted", repr(r))
 
         types = (int, int, int)
-        r = yield db.select(space_no1, 1, 0, 0xffffffff, types, same_field)
+        r = yield db.select(space_no1, 1, 0, 0xffffffff, types, identical_field)
         self.assertEqual(len(r), len(data))
         self.assertEqual(r, data)
 

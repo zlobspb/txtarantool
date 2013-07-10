@@ -62,37 +62,23 @@ class TestRequestSelect(unittest.TestCase):
 
         # select * from t1 where k0 = 1
         self.assertEqual(
-            bytes(RequestSelect(charset, errors, 1, 0, 0, 0xffff, (1,))),
+            bytes(RequestSelect(charset, errors, 1, 0, 0, 0xffff, 1)),
             binascii.unhexlify("110000001d00000000000000010000000000000000000000ffff000001000000010000000401000000"),
             "Select using integer key"
         )
 
         # select * from t1 where k0 = "AAA"
         self.assertEqual(
-            bytes(RequestSelect(charset, errors, 1, 0, 0, 0xffff, (b"AAA",))),
+            bytes(RequestSelect(charset, errors, 1, 0, 0, 0xffff, b"AAA")),
             binascii.unhexlify("110000001c00000000000000010000000000000000000000ffff0000010000000100000003414141"),
             "Select using string key"
         )
 
-        # select * from t1 where k0 in (1, 2, 3)
-        self.assertEqual(
-            bytes(RequestSelect(charset, errors, 1, 0, 0, 0xffff, (1,), (2,), (3,))),
-            binascii.unhexlify("110000002f00000000000000010000000000000000000000ffff000003000000010000000401000000010000000402000000010000000403000000"),
-            "Select multiple keys"
-        )
-
         # select * from t1 where k0 = (1, 2)
         self.assertEqual(
-            bytes(RequestSelect(charset, errors, 1, 0, 0, 0xffff, (1, 2))),
+            bytes(RequestSelect(charset, errors, 1, 0, 0, 0xffff, 1, 2)),
             binascii.unhexlify("110000002200000000000000010000000000000000000000ffff0000010000000200000004010000000402000000"),
             "Select using composite index"
-        )
-
-        # select * from t1 where k0 = (1, 2) or k0 = (3, 4)
-        self.assertEqual(
-            bytes(RequestSelect(charset, errors, 1, 0, 0, 0xffff, (1, 2), (3, 4))),
-            binascii.unhexlify("110000003000000000000000010000000000000000000000ffff00000200000002000000040100000004020000000200000004030000000404000000"),
-            "Select multiple keys using composite index"
         )
 
 
