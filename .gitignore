@@ -1,0 +1,5 @@
+*.py[cod]
+.idea/
+_trial_temp
+_tarantool_temp
+
