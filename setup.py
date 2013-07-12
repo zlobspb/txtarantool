@@ -34,7 +34,7 @@ import setuptools
 
 setuptools.setup(
     name="txtarantool",
-    version="0.1",
+    version="0.5",
     py_modules=["txtarantool"],
     install_requires=["twisted"],
     author="Alexander V. Panfilov",

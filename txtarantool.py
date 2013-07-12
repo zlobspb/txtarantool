@@ -69,7 +69,16 @@ struct_LLLL = struct.Struct("<LLLL")
 struct_LLLLL = struct.Struct("<LLLLL")
 struct_Q = struct.Struct("<Q")
 
-UPDATE_OPERATION_CODE = {'=': 0, '+': 1, '&': 2, '^': 3, '|': 4, 'splice': 5}
+UPDATE_OPERATION_CODE = {
+    '=': 0,       # assign operation argument to field <field_no>; will extend the tuple if <field_no> == <max_field_no> + 1
+    '+': 1,       # add argument to field <field_no>, both arguments are treated as signed 32 or 64 -bit ints
+    '&': 2,       # bitwise AND of argument and field <field_no>
+    '^': 3,       # bitwise XOR of argument and field <field_no>
+    '|': 4,       # bitwise OR of argument and field <field_no>
+    'splice': 5,  # implementation of Perl 'splice' command
+    '#': 6,       # delete <field_no>
+    '!': 7        # insert before <field_no>
+}
 
 
 class Request(object):
@@ -94,7 +103,7 @@ class Request(object):
     # Pre-generated results of pack_int_base128() for small arguments (0..16383)
     _int_base128 = tuple(
         (
-            struct_B.pack(val) if val < 128 else struct_BB.pack(val >> 7 & 0xff | 0x80, val & 0x7F) \
+            struct_B.pack(val) if val < 128 else struct_BB.pack(val >> 7 & 0xff | 0x80, val & 0x7F)
             for val in xrange(0x4000)
         )
     )
@@ -196,7 +205,7 @@ class Request(object):
         """
         assert isinstance(value, str)
         value_len_packed = cls.pack_int_base128(len(value))
-        return struct.pack("<%ds%ds"%(len(value_len_packed), len(value)), value_len_packed,  value)
+        return struct.pack("<%ds%ds" % (len(value_len_packed), len(value)), value_len_packed,  value)
 
     @classmethod
     def pack_unicode(cls, value, charset="utf-8", errors="strict"):
@@ -218,7 +227,7 @@ class Request(object):
             raise InvalidData("Error encoding unicode value '%s': %s" % (repr(value), e))
 
         value_len_packed = cls.pack_int_base128(len(value))
-        return struct.pack("<%ds%ds"%(len(value_len_packed), len(value)), value_len_packed,  value)
+        return struct.pack("<%ds%ds" % (len(value_len_packed), len(value)), value_len_packed,  value)
 
     def pack_field(self, value):
         """
@@ -336,7 +345,7 @@ class RequestUpdate(Request):
     def __init__(self, charset, errors, space_no, flags, key_list, op_list):
         super(RequestUpdate, self).__init__(charset, errors)
         request_body = struct_LL.pack(space_no, flags) + self.pack_tuple(key_list) \
-                       + struct_L.pack(len(op_list)) + self.pack_operations(op_list)
+            + struct_L.pack(len(op_list)) + self.pack_operations(op_list)
         self._bytes = self.header(self.TNT_OP_UPDATE, len(request_body)) + request_body
 
     def pack_operations(cls, op_list):
@@ -469,7 +478,7 @@ class field(bytes):
                 raise ValueError("Integer argument out of range")
 
         # NOTE: It is posible to implement float
-        raise TypeError("Unsupported argument type '%s'"%(type(value).__name__))
+        raise TypeError("Unsupported argument type '%s'" % (type(value).__name__))
 
     def __int__(self):
         """
@@ -568,7 +577,7 @@ class Response(list):
         offset = 4    # The first 4 bytes in the response body is the <count> we have already read
         for i in xrange(cardinality):
             field_size, offset = self._unpack_int_base128(buff, offset)
-            field_data = struct.unpack_from("<%ds"%field_size, buff, offset)[0]
+            field_data = struct.unpack_from("<%ds" % field_size, buff, offset)[0]
             _tuple[i] = field(field_data)
             offset += field_size
 
@@ -697,7 +706,7 @@ class Response(list):
         elif cast_to in (any, bytes):
             return value
         else:
-            raise TypeError("Invalid field type %s"%(cast_to))
+            raise TypeError("Invalid field type %s" % (cast_to))
 
     def _cast_tuple(self, values):
         """
@@ -788,55 +797,102 @@ class TarantoolProtocol(IprotoPacketReceiver, policies.TimeoutMixin, object):
     # Tarantool COMMANDS
 
     def ping(self):
+        """
+        send ping packet to tarantool server and receive response with empty body
+        """
         packet = RequestPing(self.charset, self.errors)
         return self.send_packet(packet)
 
     def insert(self, space_no, *args):
+        """
+        insert tuple, if primary key exists server will return error
+        """
         packet = RequestInsert(self.charset, self.errors, space_no, Request.TNT_FLAG_ADD, *args)
         return self.send_packet(packet)
 
     def insert_ret(self, space_no, field_types, *args):
+        """
+        insert tuple, inserted tuple is sent back, if primary key exists server will return error
+        """
         packet = RequestInsert(self.charset, self.errors,
                                space_no, Request.TNT_FLAG_ADD | Request.TNT_FLAG_RETURN, *args)
         return self.send_packet(packet, field_types)
 
-    def select(self, space_no, index_no, offset, limit, field_types, *args):
+    def select(self, space_no, index_no, field_types, *args):
+        """
+        select tuple(s)
+        """
+        packet = RequestSelect(self.charset, self.errors, space_no, index_no, 0, 0xffffffff, *args)
+        return self.send_packet(packet, field_types)
+
+    def select_ext(self, space_no, index_no, offset, limit, field_types, *args):
+        """
+        select tuple(s), additional parameters are submitted: offset and limit
+        """
         packet = RequestSelect(self.charset, self.errors, space_no, index_no, offset, limit, *args)
         return self.send_packet(packet, field_types)
 
     def update(self, space_no, key_tuple, op_list):
+        """
+        send update command(s)
+        """
         packet = RequestUpdate(self.charset, self.errors, space_no, 0, key_tuple, op_list)
         return self.send_packet(packet)
 
-    def update_ret(self, space_no, key_tuple, op_list):
+    def update_ret(self, space_no, field_types, key_tuple, op_list):
+        """
+        send update command(s), updated tuple(s) is(are) sent back
+        """
         packet = RequestUpdate(self.charset, self.errors, space_no, Request.TNT_FLAG_RETURN, key_tuple, op_list)
-        return self.send_packet(packet)
+        return self.send_packet(packet, field_types)
 
     def delete(self, space_no, *args):
+        """
+        delete tuple by primary key
+        """
         packet = RequestDelete(self.charset, self.errors, space_no, 0, *args)
         return self.send_packet(packet)
 
-    def delete_ret(self, space_no, *args):
+    def delete_ret(self, space_no, field_types, *args):
+        """
+        delete tuple by primary key, deleted tuple is sent back
+        """
         packet = RequestDelete(self.charset, self.errors, space_no, Request.TNT_FLAG_RETURN, *args)
-        return self.send_packet(packet)
+        return self.send_packet(packet, field_types)
 
     def replace(self, space_no, *args):
+        """
+        insert tuple, if primary key exists it will be rewritten
+        """
         packet = RequestInsert(self.charset, self.errors, space_no, 0, *args)
         return self.send_packet(packet)
 
     def replace_ret(self, space_no, field_types, *args):
-        packet = RequestInsert(self.charset, self.errors, Request.TNT_FLAG_RETURN, *args)
+        """
+        insert tuple, inserted tuple is sent back, if primary key exists it will be rewritten
+        """
+        packet = RequestInsert(self.charset, self.errors, space_no, Request.TNT_FLAG_RETURN, *args)
         return self.send_packet(packet, field_types)
 
     def replace_req(self, space_no, *args):
+        """
+        insert tuple, if tuple with same primary key doesn't exist server will return error
+        """
         packet = RequestInsert(self.charset, self.errors, space_no, Request.TNT_FLAG_REPLACE, *args)
         return self.send_packet(packet)
 
     def replace_req_ret(self, space_no, field_types, *args):
-        packet = RequestInsert(self.charset, self.errors, Request.TNT_FLAG_REPLACE | Request.TNT_FLAG_RETURN, *args)
+        """
+        insert tuple, inserted tuple is sent back, if tuple with same primary key doesn't exist server will return error
+        """
+        packet = RequestInsert(self.charset, self.errors,
+                               space_no, Request.TNT_FLAG_REPLACE | Request.TNT_FLAG_RETURN, *args)
         return self.send_packet(packet, field_types)
 
-    def call(self, space_no, proc_name, field_types, *args):
+    def call(self, proc_name, field_types, *args):
+        """
+        call server procedure
+        """
         packet = RequestCall(self.charset, self.errors, proc_name, 0, *args)
         return self.send_packet(packet, field_types)
 
@@ -1039,4 +1095,4 @@ __all__ = [
 ]
 
 __author__ = "Alexander V. Panfilov"
-__version__ = version = "0.1"
+__version__ = version = "0.5"

@@ -9,18 +9,23 @@ branches:
     - master
 
 install:
+  - curl --silent --remote-name http://tarantool.org/dist/public.key
+  - sudo apt-key add ./public.key
+  - echo "deb http://tarantool.org/dist/ubuntu/ `lsb_release -c -s` main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
+  - echo "deb-src http://tarantool.org/dist/ubuntu/ `lsb_release -c -s` main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
+
   - sudo apt-get update > /dev/null
   - sudo apt-get -q install tarantool
 
   - mkdir _tarantool_temp
-  - cp init.lua _tarantool_temp/
+  - echo "function tear_down_space(space_no) box.space[tonumber(space_no)]:truncate() end" > _tarantool_temp/init.lua
   - tarantool_box -c tarantool.cfg --init-storage
   - tarantool_box -c tarantool.cfg --background
 
   - pip install . --use-mirrors
 
 notifications:
-    email: false
+  email: false
 
 script: trial tests/
 

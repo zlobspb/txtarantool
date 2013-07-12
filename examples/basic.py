@@ -16,8 +16,7 @@ def main():
 
     t0 = time.time()
     r = yield tc.ping()
-    assert r == b'', "invalid ping response: %s" % (r)
-    print "ping ok: %s" % (time.time() - t0)
+    print r, time.time() - t0
 
 
 if __name__ == "__main__":
