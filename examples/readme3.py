@@ -83,7 +83,10 @@ class DelHandler(cyclone.web.RequestHandler, tarantoolMixin):
             raise cyclone.web.HTTPError(503)
 
         self.set_header("Content-Type", "text/plain")
-        self.write("del: %s=%s\r\n" % (key, value[0][1]))
+        if value:
+            self.write("del: %s=%s\r\n" % (key, value[0][1]))
+        else:
+            self.write("del: no such key\r\n")
 
 
 def main():

@@ -218,7 +218,7 @@ of requests. Then, start tarantool again and give it another try.
 [Example](https://raw.github.com/zlobspb/txtarantool/master/examples/readme3.py):
 ```python
 #!/usr/bin/env python
-# coding: utf-8
+# -*- coding: utf-8 -*-
 
 import sys
 
@@ -249,11 +249,11 @@ class Application(cyclone.web.Application):
 
 
 class tarantoolMixin(object):
-    tarantool_conn = None
+    tnt_conn = None
 
     @classmethod
     def setup(self):
-        tarantoolMixin.tarantool_conn = txtarantool.lazyConnectionPool()
+        tarantoolMixin.tnt_conn = txtarantool.lazyConnectionPool()
 
 
 class SetHandler(cyclone.web.RequestHandler, tarantoolMixin):
@@ -265,7 +265,7 @@ class SetHandler(cyclone.web.RequestHandler, tarantoolMixin):
             raise cyclone.web.HTTPError(400, "Bad parameters")
 
         try:
-            value = yield self.tarantool_conn.replace_ret(0, None, key, value)
+            value = yield self.tnt_conn.replace_ret(0, None, key, value)
         except Exception, e:
             log.msg("tarantool failed to replace('%s'): %s" % (key, str(e)))
             raise cyclone.web.HTTPError(503)
@@ -278,7 +278,7 @@ class GetHandler(cyclone.web.RequestHandler, tarantoolMixin):
     @defer.inlineCallbacks
     def get(self, key):
         try:
-            value = yield self.tarantool_conn.select(0, 0, None, key)
+            value = yield self.tnt_conn.select(0, 0, None, key)
         except Exception, e:
             log.msg("tarantool failed to get('%s'): %s" % (key, str(e)))
             raise cyclone.web.HTTPError(503)
@@ -294,13 +294,16 @@ class DelHandler(cyclone.web.RequestHandler, tarantoolMixin):
     @defer.inlineCallbacks
     def get(self, key):
         try:
-            value = yield self.tarantool_conn.delete_ret(0, None, key)
+            value = yield self.tnt_conn.delete_ret(0, None, key)
         except Exception, e:
             log.msg("tarantool failed to get('%s'): %s" % (key, str(e)))
             raise cyclone.web.HTTPError(503)
 
         self.set_header("Content-Type", "text/plain")
-        self.write("del: %s=%s\r\n" % (key, value[0][1]))
+        if value:
+            self.write("del: %s=%s\r\n" % (key, value[0][1]))
+        else:
+            self.write("del: no such key\r\n")
 
 
 def main():

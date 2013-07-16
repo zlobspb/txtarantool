@@ -21,6 +21,34 @@ insert_string_length_max = config.insert_string_length_max
 insert_string_choice = config.insert_string_choice
 
 
+class TestPing(unittest.TestCase):
+
+    @defer.inlineCallbacks
+    def test_ping(self):
+        db = yield tnt.Connection(tnt_host, tnt_port, reconnect=False)
+        r = yield db.ping()
+        self.assertEqual(len(r), 0)
+        self.assertEqual(repr(r), "ping ok")
+        yield db.disconnect()
+
+    @defer.inlineCallbacks
+    def test_ping_list(self):
+        db = yield tnt.Connection(tnt_host, tnt_port, reconnect=False)
+
+        defer_list = []
+        for t in xrange(10):
+            r = db.ping()
+            defer_list.append(r)
+
+        result = yield defer.DeferredList(defer_list)
+        for status, r in result:
+            self.assertTrue(status)
+            self.assertEqual(len(r), 0)
+            self.assertEqual(repr(r), "ping ok")
+
+        yield db.disconnect()
+
+
 class TestInsert(unittest.TestCase):
 
     @defer.inlineCallbacks

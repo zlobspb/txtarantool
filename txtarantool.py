@@ -32,6 +32,7 @@
 
 import struct
 import itertools
+from collections import deque
 
 from twisted.internet import defer
 from twisted.internet import protocol
@@ -118,8 +119,8 @@ class Request(object):
     __str__ = __bytes__
 
     @staticmethod
-    def header(request_type, body_length):
-        return struct_LLL.pack(request_type, body_length, 0)
+    def header(request_type, body_length, request_id):
+        return struct_LLL.pack(request_type, body_length, request_id)
 
     @staticmethod
     def pack_int(value):
@@ -287,10 +288,10 @@ class RequestInsert(Request):
                                                                |
                           items to add (multiple values)  -----+
     """
-    def __init__(self, charset, errors, space_no, flags, *args):
+    def __init__(self, charset, errors, request_id, space_no, flags, *args):
         super(RequestInsert, self).__init__(charset, errors)
         request_body = struct_LL.pack(space_no, flags) + self.pack_tuple(args)
-        self._bytes = self.header(self.TNT_OP_INSERT, len(request_body)) + request_body
+        self._bytes = self.header(self.TNT_OP_INSERT, len(request_body), request_id) + request_body
 
 
 class RequestDelete(Request):
@@ -304,10 +305,10 @@ class RequestDelete(Request):
                           key to search in primary index  -----+
                           (tuple with single value)
     """
-    def __init__(self, charset, errors, space_no, flags, *args):
+    def __init__(self, charset, errors, request_id, space_no, flags, *args):
         super(RequestDelete, self).__init__(charset, errors)
         request_body = struct_LL.pack(space_no, flags) + self.pack_tuple(args)
-        self._bytes = self.header(self.TNT_OP_DELETE, len(request_body)) + request_body
+        self._bytes = self.header(self.TNT_OP_DELETE, len(request_body), request_id) + request_body
 
 
 class RequestSelect(Request):
@@ -325,10 +326,10 @@ class RequestSelect(Request):
                             List of tuples to search in the index ---------------------+
                             (tuple cardinality can be > 1 when using composite indexes)
     """
-    def __init__(self, charset, errors, space_no, index_no, offset, limit, *args):
+    def __init__(self, charset, errors, request_id, space_no, index_no, offset, limit, *args):
         super(RequestSelect, self).__init__(charset, errors)
         request_body = struct_LLLLL.pack(space_no, index_no, offset, limit, 1) + self.pack_tuple(args)
-        self._bytes = self.header(self.TNT_OP_SELECT, len(request_body)) + request_body
+        self._bytes = self.header(self.TNT_OP_SELECT, len(request_body), request_id) + request_body
 
 
 class RequestUpdate(Request):
@@ -342,11 +343,11 @@ class RequestUpdate(Request):
                            Key to search in primary index -----+      |      +-- list of operations
                            (tuple with cardinality=1)                 +-- number of operations
     """
-    def __init__(self, charset, errors, space_no, flags, key_list, op_list):
+    def __init__(self, charset, errors, request_id, space_no, flags, key_list, op_list):
         super(RequestUpdate, self).__init__(charset, errors)
         request_body = struct_LL.pack(space_no, flags) + self.pack_tuple(key_list) \
             + struct_L.pack(len(op_list)) + self.pack_operations(op_list)
-        self._bytes = self.header(self.TNT_OP_UPDATE, len(request_body)) + request_body
+        self._bytes = self.header(self.TNT_OP_UPDATE, len(request_body), request_id) + request_body
 
     def pack_operations(cls, op_list):
         result = []
@@ -375,10 +376,10 @@ class RequestCall(Request):
                                                                 |
                                     Lua function arguments -----+
     """
-    def __init__(self, charset, errors, proc_name, flags, *args):
+    def __init__(self, charset, errors, request_id, proc_name, flags, *args):
         super(RequestCall, self).__init__(charset, errors)
         request_body = struct_L.pack(flags) + self.pack_field(proc_name) + self.pack_tuple(args)
-        self._bytes = self.header(self.TNT_OP_CALL, len(request_body)) + request_body
+        self._bytes = self.header(self.TNT_OP_CALL, len(request_body), request_id) + request_body
 
 
 class IprotoPacketReceiver(protocol.Protocol, basic._PauseableMixin):
@@ -752,6 +753,71 @@ class Response(list):
         return affected + " affected"
 
 
+class QueueUnderflow(Exception):
+    pass
+
+
+class IproDeferredQueue(object):
+
+    def __init__(self, backlog=None):
+        self.waiting = {0: deque()}
+        self.backlog = backlog
+        self.id = 1
+
+    def _cancelGet(self, d):
+        if d._ipro_request_id != 0:
+            self.waiting.pop(d._ipro_request_id)
+        else:
+            self.waiting.get(0).remove(d)
+
+    def broadcast(self, obj):
+        for request_id in self.waiting.iterkeys():
+            if request_id != 0:
+                self.waiting.pop(request_id).callback(obj)
+            else:
+                for p in self.waiting.get(0):
+                    p.callback(obj)
+
+    def check_id(self, request_id):
+        if request_id != 0:
+            return request_id in self.waiting
+        else:
+            return len(self.waiting.get(0)) != 0
+
+    def put(self, request_id, obj):
+        if request_id != 0:
+            self.waiting.pop(request_id).callback(obj)
+        else:
+            self.waiting.get(0).popleft().callback(obj)
+
+    def get_ping(self):
+        d = defer.Deferred(canceller=self._cancelGet)
+
+        d._ipro_request_id = 0
+        l = self.waiting.get(0)
+        l.append(d)
+
+        return d
+
+    def get(self):
+        if self.backlog is None or len(self.waiting) - 1 < self.backlog:
+            d = defer.Deferred(canceller=self._cancelGet)
+
+            d._ipro_request_id = self.id
+            self.waiting[self.id] = d
+
+            while True:
+                self.id += 1
+                if self.id > 0xffffffff:
+                    self.id = 1
+                if not self.id in self.waiting:
+                    break
+
+            return d
+        else:
+            raise QueueUnderflow()
+
+
 class TarantoolProtocol(IprotoPacketReceiver, policies.TimeoutMixin, object):
     """
     Tarantool client protocol.
@@ -762,7 +828,7 @@ class TarantoolProtocol(IprotoPacketReceiver, policies.TimeoutMixin, object):
         self.charset = charset
         self.errors = errors
 
-        self.replyQueue = defer.DeferredQueue()
+        self.replyQueue = IproDeferredQueue()
 
     def connectionMade(self):
         self.connected = 1
@@ -772,15 +838,15 @@ class TarantoolProtocol(IprotoPacketReceiver, policies.TimeoutMixin, object):
         self.connected = 0
         self.factory.delConnection(self)
         IprotoPacketReceiver.connectionLost(self, why)
-        while self.replyQueue.waiting:
-            self.replyReceived(ConnectionError("Lost connection"))
-
-    def replyReceived(self, reply):
-        self.replyQueue.put(reply)
+        self.replyQueue.broadcast(ConnectionError("Lost connection"))
 
     def packetReceived(self, header, body):
         self.resetTimeout()
-        self.replyReceived((header, body))
+
+        if not self.replyQueue.check_id(header[2]):
+            return self.transport.loseConnection()
+
+        self.replyQueue.put(header[2], (header, body))
 
     @staticmethod
     def handle_reply(r, charset, errors, field_types):
@@ -800,101 +866,130 @@ class TarantoolProtocol(IprotoPacketReceiver, policies.TimeoutMixin, object):
         """
         send ping packet to tarantool server and receive response with empty body
         """
+        d = self.replyQueue.get_ping()
         packet = RequestPing(self.charset, self.errors)
-        return self.send_packet(packet)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, None)
 
     def insert(self, space_no, *args):
         """
         insert tuple, if primary key exists server will return error
         """
-        packet = RequestInsert(self.charset, self.errors, space_no, Request.TNT_FLAG_ADD, *args)
-        return self.send_packet(packet)
+        d = self.replyQueue.get()
+        packet = RequestInsert(self.charset, self.errors, d._ipro_request_id, space_no, Request.TNT_FLAG_ADD, *args)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, None)
 
     def insert_ret(self, space_no, field_types, *args):
         """
         insert tuple, inserted tuple is sent back, if primary key exists server will return error
         """
-        packet = RequestInsert(self.charset, self.errors,
+        d = self.replyQueue.get()
+        packet = RequestInsert(self.charset, self.errors, d._ipro_request_id,
                                space_no, Request.TNT_FLAG_ADD | Request.TNT_FLAG_RETURN, *args)
-        return self.send_packet(packet, field_types)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, field_types)
 
     def select(self, space_no, index_no, field_types, *args):
         """
         select tuple(s)
         """
-        packet = RequestSelect(self.charset, self.errors, space_no, index_no, 0, 0xffffffff, *args)
-        return self.send_packet(packet, field_types)
+        d = self.replyQueue.get()
+        packet = RequestSelect(self.charset, self.errors, d._ipro_request_id, space_no, index_no, 0, 0xffffffff, *args)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, field_types)
 
     def select_ext(self, space_no, index_no, offset, limit, field_types, *args):
         """
         select tuple(s), additional parameters are submitted: offset and limit
         """
-        packet = RequestSelect(self.charset, self.errors, space_no, index_no, offset, limit, *args)
-        return self.send_packet(packet, field_types)
+        d = self.replyQueue.get()
+        packet = RequestSelect(self.charset, self.errors, d._ipro_request_id, space_no, index_no, offset, limit, *args)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, field_types)
 
     def update(self, space_no, key_tuple, op_list):
         """
         send update command(s)
         """
-        packet = RequestUpdate(self.charset, self.errors, space_no, 0, key_tuple, op_list)
-        return self.send_packet(packet)
+        d = self.replyQueue.get()
+        packet = RequestUpdate(self.charset, self.errors, d._ipro_request_id, space_no, 0, key_tuple, op_list)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, None)
 
     def update_ret(self, space_no, field_types, key_tuple, op_list):
         """
         send update command(s), updated tuple(s) is(are) sent back
         """
-        packet = RequestUpdate(self.charset, self.errors, space_no, Request.TNT_FLAG_RETURN, key_tuple, op_list)
-        return self.send_packet(packet, field_types)
+        d = self.replyQueue.get()
+        packet = RequestUpdate(self.charset, self.errors, d._ipro_request_id,
+                               space_no, Request.TNT_FLAG_RETURN, key_tuple, op_list)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, field_types)
 
     def delete(self, space_no, *args):
         """
         delete tuple by primary key
         """
-        packet = RequestDelete(self.charset, self.errors, space_no, 0, *args)
-        return self.send_packet(packet)
+        d = self.replyQueue.get()
+        packet = RequestDelete(self.charset, self.errors, d._ipro_request_id, space_no, 0, *args)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, None)
 
     def delete_ret(self, space_no, field_types, *args):
         """
         delete tuple by primary key, deleted tuple is sent back
         """
-        packet = RequestDelete(self.charset, self.errors, space_no, Request.TNT_FLAG_RETURN, *args)
-        return self.send_packet(packet, field_types)
+        d = self.replyQueue.get()
+        packet = RequestDelete(self.charset, self.errors, d._ipro_request_id, space_no, Request.TNT_FLAG_RETURN, *args)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, field_types)
 
     def replace(self, space_no, *args):
         """
         insert tuple, if primary key exists it will be rewritten
         """
-        packet = RequestInsert(self.charset, self.errors, space_no, 0, *args)
-        return self.send_packet(packet)
+        d = self.replyQueue.get()
+        packet = RequestInsert(self.charset, self.errors, d._ipro_request_id, space_no, 0, *args)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, None)
 
     def replace_ret(self, space_no, field_types, *args):
         """
         insert tuple, inserted tuple is sent back, if primary key exists it will be rewritten
         """
-        packet = RequestInsert(self.charset, self.errors, space_no, Request.TNT_FLAG_RETURN, *args)
-        return self.send_packet(packet, field_types)
+        d = self.replyQueue.get()
+        packet = RequestInsert(self.charset, self.errors, d._ipro_request_id, space_no, Request.TNT_FLAG_RETURN, *args)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, field_types)
 
     def replace_req(self, space_no, *args):
         """
         insert tuple, if tuple with same primary key doesn't exist server will return error
         """
-        packet = RequestInsert(self.charset, self.errors, space_no, Request.TNT_FLAG_REPLACE, *args)
-        return self.send_packet(packet)
+        d = self.replyQueue.get()
+        packet = RequestInsert(self.charset, self.errors, d._ipro_request_id, space_no, Request.TNT_FLAG_REPLACE, *args)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, None)
 
     def replace_req_ret(self, space_no, field_types, *args):
         """
         insert tuple, inserted tuple is sent back, if tuple with same primary key doesn't exist server will return error
         """
-        packet = RequestInsert(self.charset, self.errors,
+        d = self.replyQueue.get()
+        packet = RequestInsert(self.charset, self.errors, d._ipro_request_id,
                                space_no, Request.TNT_FLAG_REPLACE | Request.TNT_FLAG_RETURN, *args)
-        return self.send_packet(packet, field_types)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, field_types)
 
     def call(self, proc_name, field_types, *args):
         """
         call server procedure
         """
-        packet = RequestCall(self.charset, self.errors, proc_name, 0, *args)
-        return self.send_packet(packet, field_types)
+        d = self.replyQueue.get()
+        packet = RequestCall(self.charset, self.errors, d._ipro_request_id, proc_name, 0, *args)
+        self.transport.write(bytes(packet))
+        return d.addCallback(self.handle_reply, self.charset, self.errors, field_types)
 
 
 class ConnectionHandler(object):
@@ -1095,4 +1190,4 @@ __all__ = [
 ]
 
 __author__ = "Alexander V. Panfilov"
-__version__ = version = "0.5"
+__version__ = version = "0.6"
