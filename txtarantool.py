@@ -743,7 +743,7 @@ class Response(list):
         if self._request_type == Request.TNT_OP_PING:
             return "ping ok"
         # Return string of form "N records affected"
-        affected = str(self.rowcount) + " record" if self.rowcount == 1 else " records"
+        affected = str(self.rowcount) + (" record" if self.rowcount == 1 else " records")
         if self._request_type == Request.TNT_OP_DELETE:
             return affected + " deleted"
         if self._request_type == Request.TNT_OP_INSERT:
