@@ -21,7 +21,7 @@ project directory and start using.
 
 Latest source code is at <https://github.com/zlobspb/txtarantool>.
 
-However, if you really really insist in installing, use the following commands:
+However, if you really insist in installing, use ``pip install txtarantool`` or the following commands:
 
 	git clone --depth=1 --branch=master git://github.com/zlobspb/txtarantool.git txtarantool
 	sudo pip install ./txtarantool/ --use-mirrors
