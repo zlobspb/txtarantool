@@ -2,6 +2,7 @@ txtarantool
 ===========
 
 [![Build Status](https://travis-ci.org/zlobspb/txtarantool.png?branch=master)](http://travis-ci.org/zlobspb/txtarantool)
+[![Downloads](https://pypip.in/d/txtarantool/badge.png)](https://pypi.python.org/pypi/txtarantool/)
 
 non-blocking [tarantool](https://github.com/mailru/tarantool) client for python [twisted](http://twistedmatrix.com/)
 
