@@ -699,7 +699,7 @@ class Response(list):
             return cast_to(value)
         elif cast_to == unicode:
             try:
-                value = unicode(str(value)).encode(self.charset, self.errors)
+                value = value.decode(self.charset, self.errors)
             except UnicodeEncodeError, e:
                 raise InvalidData("Error encoding unicode value '%s': %s" % (repr(value), e))
 
