@@ -11,8 +11,8 @@ branches:
 install:
   - curl --silent --remote-name http://tarantool.org/dist/public.key
   - sudo apt-key add ./public.key
-  - echo "deb http://tarantool.org/dist/ubuntu/ `lsb_release -c -s` main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
-  - echo "deb-src http://tarantool.org/dist/ubuntu/ `lsb_release -c -s` main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
+  - echo "deb http://tarantool.org/dist/stable/ubuntu/ `lsb_release -c -s` main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
+  - echo "deb-src http://tarantool.org/dist/stable/ubuntu/ `lsb_release -c -s` main" | sudo tee -a /etc/apt/sources.list.d/tarantool.list
 
   - sudo apt-get update > /dev/null
   - sudo apt-get -q install tarantool
